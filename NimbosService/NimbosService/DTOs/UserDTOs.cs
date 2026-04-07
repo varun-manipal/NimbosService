@@ -7,6 +7,7 @@ public record RegisterRequest(
     string? Pin,
     List<string> Tasks,
     string? GoogleId,
+    string? AppleId,
     string? Email
 );
 

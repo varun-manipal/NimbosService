@@ -104,4 +104,60 @@ public class AuthController : ControllerBase
             Email: email
         ));
     }
+
+    // POST /auth/apple — verify Apple user identifier, return existing user or signal new user
+    [HttpPost("apple")]
+    public async Task<IActionResult> AppleAuth([FromBody] AppleAuthRequest req)
+    {
+        if (string.IsNullOrEmpty(req.UserIdentifier))
+            return BadRequest(new { error = "Missing Apple user identifier" });
+
+        var user = await _db.Users
+            .Include(u => u.Tasks)
+            .Include(u => u.Shield)
+            .FirstOrDefaultAsync(u => u.AppleId == req.UserIdentifier);
+
+        if (user is not null)
+        {
+            // Returning user — update DeviceId
+            user.DeviceId = req.DeviceId;
+            user.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+
+            var shield = user.Shield ?? new Shield();
+            var tasks = user.Tasks.Where(t => !t.IsTomorrowOnly).ToList();
+            var tomorrowExtras = user.Tasks.Where(t => t.IsTomorrowOnly).ToList();
+
+            var userDto = new UserDTO(
+                Name: user.Name,
+                Vibe: user.Vibe,
+                TotalStars: user.TotalStars,
+                DailyStars: user.DailyStars,
+                Shield: new ShieldDTO(shield.Fragments, shield.IsActive),
+                Tasks: tasks.Select(UsersController.MapTask).ToList(),
+                TomorrowExtras: tomorrowExtras.Select(UsersController.MapTask).ToList()
+            );
+
+            return Ok(new AppleAuthResponse(
+                UserId: user.Id,
+                Token: user.Id.ToString(),
+                IsNewUser: false,
+                User: userDto,
+                AppleId: null,
+                Email: null,
+                FullName: null
+            ));
+        }
+
+        // New user — signal the app to run onboarding
+        return Ok(new AppleAuthResponse(
+            UserId: null,
+            Token: null,
+            IsNewUser: true,
+            User: null,
+            AppleId: req.UserIdentifier,
+            Email: req.Email,
+            FullName: req.FullName
+        ));
+    }
 }

@@ -21,8 +21,8 @@ public class UsersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Register([FromBody] RegisterRequest req)
     {
-        // If registering via Google Sign-In, skip device conflict check
-        if (req.GoogleId is null && await _db.Users.AnyAsync(u => u.DeviceId == req.DeviceId))
+        // If registering via Google or Apple Sign-In, skip device conflict check
+        if (req.GoogleId is null && req.AppleId is null && await _db.Users.AnyAsync(u => u.DeviceId == req.DeviceId))
             return Conflict(new { error = "Device already registered" });
 
         var user = new User
@@ -32,6 +32,7 @@ public class UsersController : ControllerBase
             Vibe = req.Vibe,
             ListPin = req.Pin,
             GoogleId = req.GoogleId,
+            AppleId = req.AppleId,
             Email = req.Email
         };
 

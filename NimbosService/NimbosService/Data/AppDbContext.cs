@@ -18,7 +18,8 @@ public class AppDbContext : DbContext
         {
             e.HasKey(u => u.Id);
             e.HasIndex(u => u.DeviceId);
-            e.HasIndex(u => u.GoogleId).IsUnique().HasFilter("\"GoogleId\" IS NOT NULL");
+            e.HasIndex(u => u.GoogleId).IsUnique().HasFilter("[GoogleId] IS NOT NULL");
+            e.HasIndex(u => u.AppleId).IsUnique().HasFilter("[AppleId] IS NOT NULL");
         });
 
         modelBuilder.Entity<TaskItem>(e =>

@@ -21,6 +21,9 @@ public class User
     [MaxLength(128)]
     public string? GoogleId { get; set; }
 
+    [MaxLength(128)]
+    public string? AppleId { get; set; }
+
     [MaxLength(254)]
     public string? Email { get; set; }
 
