@@ -17,10 +17,11 @@ public class DeviceTokenAuthMiddleware
         var path = context.Request.Path.Value ?? "";
         var method = context.Request.Method;
 
-        // Skip auth for registration, Google auth, and Swagger
+        // Skip auth for registration, Google/Apple auth, and Swagger
         if (path.StartsWith("/swagger", StringComparison.OrdinalIgnoreCase) ||
             (method == "POST" && path.Equals("/users", StringComparison.OrdinalIgnoreCase)) ||
-            (method == "POST" && path.Equals("/auth/google", StringComparison.OrdinalIgnoreCase)))
+            (method == "POST" && path.Equals("/auth/google", StringComparison.OrdinalIgnoreCase)) ||
+            (method == "POST" && path.Equals("/auth/apple", StringComparison.OrdinalIgnoreCase)))
         {
             await _next(context);
             return;

@@ -50,27 +50,29 @@ public class TasksController : ControllerBase
 
         var dbUser = await _db.Users.FindAsync(user.Id);
 
+        if (dbUser is null) return NotFound(new { error = "User not found" });
+
         // Recalculate stars server-side on completion toggle
         if (req.IsCompleted is not null)
         {
             if (req.IsCompleted.Value && !wasCompleted)
             {
-                dbUser!.TotalStars++;
+                dbUser.TotalStars++;
                 dbUser.DailyStars++;
             }
             else if (!req.IsCompleted.Value && wasCompleted)
             {
-                if (dbUser!.TotalStars > 0) dbUser.TotalStars--;
+                if (dbUser.TotalStars > 0) dbUser.TotalStars--;
                 if (dbUser.DailyStars > 0) dbUser.DailyStars--;
             }
-            dbUser!.UpdatedAt = DateTime.UtcNow;
+            dbUser.UpdatedAt = DateTime.UtcNow;
         }
 
         await _db.SaveChangesAsync();
 
         return Ok(new UpdateTaskResponse(
             Task: UsersController.MapTask(task),
-            User: new UserStarsDTO(dbUser!.TotalStars, dbUser.DailyStars)
+            User: new UserStarsDTO(dbUser.TotalStars, dbUser.DailyStars)
         ));
     }
 

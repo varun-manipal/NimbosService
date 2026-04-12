@@ -18,6 +18,7 @@ public record UpdateUserRequest(string? Name, string? Vibe, string? Pin);
 public record UserDTO(
     string Name,
     string Vibe,
+    string Role,
     int TotalStars,
     int DailyStars,
     ShieldDTO Shield,

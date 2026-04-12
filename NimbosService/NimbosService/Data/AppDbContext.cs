@@ -11,6 +11,9 @@ public class AppDbContext : DbContext
     public DbSet<TaskItem> Tasks => Set<TaskItem>();
     public DbSet<DailySnapshot> DailySnapshots => Set<DailySnapshot>();
     public DbSet<Shield> Shields => Set<Shield>();
+    public DbSet<Family> Families => Set<Family>();
+    public DbSet<FamilyMember> FamilyMembers => Set<FamilyMember>();
+    public DbSet<FamilyInvite> FamilyInvites => Set<FamilyInvite>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -48,6 +51,39 @@ public class AppDbContext : DbContext
             e.HasOne(s => s.User)
              .WithOne(u => u.Shield)
              .HasForeignKey<Shield>(s => s.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Family>(e =>
+        {
+            e.HasKey(f => f.Id);
+            e.HasIndex(f => f.InviteCode).IsUnique();
+        });
+
+        modelBuilder.Entity<FamilyInvite>(e =>
+        {
+            e.HasKey(fi => fi.Id);
+            e.Property(fi => fi.Email).HasMaxLength(256).IsRequired();
+            e.Property(fi => fi.InviteCode).HasMaxLength(8).IsRequired();
+            e.HasIndex(fi => fi.InviteCode).IsUnique();
+            e.HasOne(fi => fi.Family)
+             .WithMany(f => f.Invites)
+             .HasForeignKey(fi => fi.FamilyId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<FamilyMember>(e =>
+        {
+            e.HasKey(m => m.Id);
+            e.HasIndex(m => new { m.FamilyId, m.UserId }).IsUnique();
+            e.HasIndex(m => m.UserId);
+            e.HasOne(m => m.Family)
+             .WithMany(f => f.Members)
+             .HasForeignKey(m => m.FamilyId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(m => m.User)
+             .WithMany()
+             .HasForeignKey(m => m.UserId)
              .OnDelete(DeleteBehavior.Cascade);
         });
     }

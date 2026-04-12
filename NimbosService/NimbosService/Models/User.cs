@@ -27,6 +27,8 @@ public class User
     [MaxLength(254)]
     public string? Email { get; set; }
 
+    public UserRole Role { get; set; } = UserRole.Solo;
+
     public int TotalStars { get; set; } = 0;
     public int DailyStars { get; set; } = 0;
 

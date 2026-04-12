@@ -74,6 +74,7 @@ public class UsersController : ControllerBase
         return Ok(new UserDTO(
             Name: user.Name,
             Vibe: user.Vibe,
+            Role: user.Role.ToString().ToLowerInvariant(),
             TotalStars: user.TotalStars,
             DailyStars: user.DailyStars,
             Shield: new ShieldDTO(shield.Fragments, shield.IsActive),
@@ -89,10 +90,12 @@ public class UsersController : ControllerBase
         var currentUser = (User)HttpContext.Items["CurrentUser"]!;
         var user = await _db.Users.FindAsync(currentUser.Id);
 
-        if (req.Name is not null) user!.Name = req.Name;
-        if (req.Vibe is not null) user!.Vibe = req.Vibe;
-        if (req.Pin is not null) user!.ListPin = req.Pin;
-        user!.UpdatedAt = DateTime.UtcNow;
+        if (user is null) return NotFound(new { error = "User not found" });
+
+        if (req.Name is not null) user.Name = req.Name;
+        if (req.Vibe is not null) user.Vibe = req.Vibe;
+        if (req.Pin is not null) user.ListPin = req.Pin;
+        user.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
         return Ok(new { name = user.Name, vibe = user.Vibe });
@@ -112,6 +115,7 @@ public class UsersController : ControllerBase
         new(
             Name: user.Name,
             Vibe: user.Vibe,
+            Role: user.Role.ToString().ToLowerInvariant(),
             TotalStars: user.TotalStars,
             DailyStars: user.DailyStars,
             Shield: new ShieldDTO(shield.Fragments, shield.IsActive),

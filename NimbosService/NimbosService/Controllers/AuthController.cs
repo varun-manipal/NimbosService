@@ -26,29 +26,41 @@ public class AuthController : ControllerBase
     [HttpPost("google")]
     public async Task<IActionResult> GoogleAuth([FromBody] GoogleAuthRequest req)
     {
+        if (string.IsNullOrWhiteSpace(req.IdToken))
+            return BadRequest(new { error = "ID token is required" });
+
         // 1. Verify the token with Google's tokeninfo endpoint
-        var client = _httpClientFactory.CreateClient();
-        var tokenInfoUrl = $"https://oauth2.googleapis.com/tokeninfo?id_token={req.IdToken}";
-        var response = await client.GetAsync(tokenInfoUrl);
+        JsonElement root;
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(10);
+            var tokenInfoUrl = $"https://oauth2.googleapis.com/tokeninfo?id_token={req.IdToken}";
+            var response = await client.GetAsync(tokenInfoUrl);
 
-        if (!response.IsSuccessStatusCode)
-            return Unauthorized(new { error = "Invalid Google token" });
+            if (!response.IsSuccessStatusCode)
+                return Unauthorized(new { error = "Invalid Google token" });
 
-        var json = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            root = doc.RootElement.Clone();
+        }
+        catch (Exception)
+        {
+            return StatusCode(500, new { error = "Failed to verify token with Google" });
+        }
 
         // 2. Validate audience matches our iOS client ID
         var expectedClientId = _config["Google:ClientId"];
         var aud = root.TryGetProperty("aud", out var audProp) ? audProp.GetString() : null;
         Console.WriteLine($"Token aud: {aud}");
         Console.WriteLine($"Expected clientId: {expectedClientId}");
-        if (aud != expectedClientId)
+        if (string.IsNullOrEmpty(aud) || aud != expectedClientId)
             return Unauthorized(new { error = $"Token audience mismatch: got {aud}, expected {expectedClientId}" });
 
         // 3. Validate email is verified
-        var emailVerified = root.TryGetProperty("email_verified", out var evProp) ? evProp.GetString() : null;
-        if (emailVerified != "true")
+        var emailVerified = root.TryGetProperty("email_verified", out var evProp) && evProp.GetBoolean();
+        if (!emailVerified)
             return Unauthorized(new { error = "Email not verified" });
 
         var googleId = root.TryGetProperty("sub", out var subProp) ? subProp.GetString() : null;
@@ -77,6 +89,7 @@ public class AuthController : ControllerBase
             var userDto = new UserDTO(
                 Name: user.Name,
                 Vibe: user.Vibe,
+                Role: user.Role.ToString().ToLowerInvariant(),
                 TotalStars: user.TotalStars,
                 DailyStars: user.DailyStars,
                 Shield: new ShieldDTO(shield.Fragments, shield.IsActive),
@@ -131,6 +144,7 @@ public class AuthController : ControllerBase
             var userDto = new UserDTO(
                 Name: user.Name,
                 Vibe: user.Vibe,
+                Role: user.Role.ToString().ToLowerInvariant(),
                 TotalStars: user.TotalStars,
                 DailyStars: user.DailyStars,
                 Shield: new ShieldDTO(shield.Fragments, shield.IsActive),

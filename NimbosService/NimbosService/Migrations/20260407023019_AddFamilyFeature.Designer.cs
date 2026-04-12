@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NimbosService.Data;
 
@@ -11,9 +12,11 @@ using NimbosService.Data;
 namespace NimbosService.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260407023019_AddFamilyFeature")]
+    partial class AddFamilyFeature
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -76,41 +79,6 @@ namespace NimbosService.Migrations
                         .IsUnique();
 
                     b.ToTable("Families");
-                });
-
-            modelBuilder.Entity("NimbosService.Models.FamilyInvite", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<Guid>("FamilyId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("InviteCode")
-                        .IsRequired()
-                        .HasMaxLength(8)
-                        .HasColumnType("nvarchar(8)");
-
-                    b.Property<bool>("IsUsed")
-                        .HasColumnType("bit");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("FamilyId");
-
-                    b.HasIndex("InviteCode")
-                        .IsUnique();
-
-                    b.ToTable("FamilyInvites");
                 });
 
             modelBuilder.Entity("NimbosService.Models.FamilyMember", b =>
@@ -283,17 +251,6 @@ namespace NimbosService.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("NimbosService.Models.FamilyInvite", b =>
-                {
-                    b.HasOne("NimbosService.Models.Family", "Family")
-                        .WithMany("Invites")
-                        .HasForeignKey("FamilyId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Family");
-                });
-
             modelBuilder.Entity("NimbosService.Models.FamilyMember", b =>
                 {
                     b.HasOne("NimbosService.Models.Family", "Family")
@@ -337,8 +294,6 @@ namespace NimbosService.Migrations
 
             modelBuilder.Entity("NimbosService.Models.Family", b =>
                 {
-                    b.Navigation("Invites");
-
                     b.Navigation("Members");
                 });
 

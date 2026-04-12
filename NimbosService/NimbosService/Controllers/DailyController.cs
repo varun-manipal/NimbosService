@@ -29,6 +29,9 @@ public class DailyController : ControllerBase
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
         var dbUser = await _db.Users.FindAsync(currentUser.Id);
+
+        if (dbUser is null) return NotFound(new { error = "User not found" });
+
         var dbShield = await _db.Shields.FindAsync(currentUser.Id);
         var allTasks = await _db.Tasks.Where(t => t.UserId == currentUser.Id).ToListAsync();
 
@@ -50,7 +53,7 @@ public class DailyController : ControllerBase
         var completedCount = regularTasks.Count(t => t.IsCompleted);
         var totalCount = regularTasks.Count;
         var completionPct = totalCount > 0 ? (double)completedCount / totalCount : 0.0;
-        var starsLit = dbUser!.DailyStars;
+        var starsLit = dbUser.DailyStars;
 
         // Upsert daily snapshot
         var existing = await _db.DailySnapshots.FirstOrDefaultAsync(

@@ -1,0 +1,310 @@
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using NimbosService.Data;
+using NimbosService.DTOs;
+using NimbosService.Models;
+
+namespace NimbosService.Controllers;
+
+[ApiController]
+[Route("family")]
+public class FamilyController : ControllerBase
+{
+    private readonly AppDbContext _db;
+
+    public FamilyController(AppDbContext db)
+    {
+        _db = db;
+    }
+
+    private User CurrentUser => (User)HttpContext.Items["CurrentUser"]!;
+
+    // POST /family — create a new family, caller becomes Parent
+    [HttpPost]
+    public async Task<IActionResult> CreateFamily([FromBody] CreateFamilyRequest req)
+    {
+        var user = CurrentUser;
+
+        if (await _db.FamilyMembers.AnyAsync(m => m.UserId == user.Id))
+            return Conflict(new { error = "You are already in a family." });
+
+        var family = new Family { Name = req.FamilyName, InviteCode = string.Empty };
+        _db.Families.Add(family);
+
+        _db.FamilyMembers.Add(new FamilyMember
+        {
+            FamilyId = family.Id,
+            UserId = user.Id,
+            Role = FamilyRole.Parent
+        });
+
+        user.Role = UserRole.Parent;
+        await _db.SaveChangesAsync();
+
+        return Ok(new FamilyResponse(family.Id, family.Name, new List<FamilyMemberDTO>
+        {
+            new(user.Id, user.Name, "Parent", user.TotalStars, user.DailyStars)
+        }));
+    }
+
+    // GET /family — get current user's family info
+    [HttpGet]
+    public async Task<IActionResult> GetFamily()
+    {
+        var user = CurrentUser;
+
+        var membership = await _db.FamilyMembers
+            .Include(m => m.Family).ThenInclude(f => f.Members).ThenInclude(m => m.User)
+            .FirstOrDefaultAsync(m => m.UserId == user.Id);
+
+        if (membership is null)
+            return NotFound(new { error = "You are not in a family." });
+
+        var family = membership.Family;
+        var members = family.Members.Select(m =>
+            new FamilyMemberDTO(m.UserId, m.User.Name, m.Role.ToString(), m.User.TotalStars, m.User.DailyStars)
+        ).ToList();
+
+        return Ok(new FamilyResponse(family.Id, family.Name, members));
+    }
+
+    // GET /family/invites — parent lists pending (unused) invites
+    [HttpGet("invites")]
+    public async Task<IActionResult> GetPendingInvites()
+    {
+        var user = CurrentUser;
+        var family = await GetParentFamily(user.Id);
+        if (family is null) return Forbid();
+
+        var pending = await _db.FamilyInvites
+            .Where(fi => fi.FamilyId == family.Id && !fi.IsUsed)
+            .OrderByDescending(fi => fi.CreatedAt)
+            .Select(fi => new InviteResponse(fi.InviteCode, fi.Email))
+            .ToListAsync();
+
+        return Ok(pending);
+    }
+
+    // DELETE /family/invites/{inviteCode} — parent cancels a pending invite
+    [HttpDelete("invites/{inviteCode}")]
+    public async Task<IActionResult> DeleteInvite(string inviteCode)
+    {
+        var user = CurrentUser;
+        var family = await GetParentFamily(user.Id);
+        if (family is null) return Forbid();
+
+        var invite = await _db.FamilyInvites
+            .FirstOrDefaultAsync(fi => fi.FamilyId == family.Id &&
+                                       fi.InviteCode == inviteCode.ToUpper() &&
+                                       !fi.IsUsed);
+
+        if (invite is null) return NotFound();
+
+        _db.FamilyInvites.Remove(invite);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    // POST /family/invites — parent creates an email-specific invite code
+    [HttpPost("invites")]
+    public async Task<IActionResult> CreateInvite([FromBody] CreateInviteRequest req)
+    {
+        var user = CurrentUser;
+        var family = await GetParentFamily(user.Id);
+        if (family is null) return Forbid();
+
+        var email = req.Email.Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(email))
+            return BadRequest(new { error = "Email is required." });
+
+        // Return existing unused invite for this email if one exists
+        var existing = await _db.FamilyInvites
+            .FirstOrDefaultAsync(fi => fi.FamilyId == family.Id && fi.Email == email && !fi.IsUsed);
+        if (existing is not null)
+            return Ok(new InviteResponse(existing.InviteCode, existing.Email));
+
+        // Generate a unique invite code
+        var code = GenerateInviteCode();
+        while (await _db.FamilyInvites.AnyAsync(fi => fi.InviteCode == code))
+            code = GenerateInviteCode();
+
+        var invite = new FamilyInvite { FamilyId = family.Id, Email = email, InviteCode = code };
+        _db.FamilyInvites.Add(invite);
+        await _db.SaveChangesAsync();
+
+        return Ok(new InviteResponse(code, email));
+    }
+
+    // POST /family/join — join a family as Child using invite code + email
+    [HttpPost("join")]
+    public async Task<IActionResult> JoinFamily([FromBody] JoinFamilyRequest req)
+    {
+        var user = CurrentUser;
+
+        if (await _db.FamilyMembers.AnyAsync(m => m.UserId == user.Id))
+            return Conflict(new { error = "You are already in a family." });
+
+        var invite = await _db.FamilyInvites
+            .Include(fi => fi.Family).ThenInclude(f => f.Members).ThenInclude(m => m.User)
+            .FirstOrDefaultAsync(fi => fi.InviteCode == req.InviteCode.ToUpper() && !fi.IsUsed);
+
+        if (invite is null)
+            return NotFound(new { error = "Invalid or already used invite code." });
+
+        if (!string.Equals(invite.Email, req.Email.Trim(), StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { error = "Email does not match the invite." });
+
+        invite.IsUsed = true;
+
+        _db.FamilyMembers.Add(new FamilyMember
+        {
+            FamilyId = invite.FamilyId,
+            UserId = user.Id,
+            Role = FamilyRole.Child
+        });
+
+        user.Role = UserRole.Child;
+        await _db.SaveChangesAsync();
+
+        var family = invite.Family;
+        var members = family.Members.Select(m =>
+            new FamilyMemberDTO(m.UserId, m.User.Name, m.Role.ToString(), m.User.TotalStars, m.User.DailyStars)
+        ).ToList();
+        members.Add(new FamilyMemberDTO(user.Id, user.Name, "Child", user.TotalStars, user.DailyStars));
+
+        return Ok(new FamilyResponse(family.Id, family.Name, members));
+    }
+
+    // GET /family/children — parent gets list of children with progress
+    [HttpGet("children")]
+    public async Task<IActionResult> GetChildren()
+    {
+        var user = CurrentUser;
+        var family = await GetParentFamily(user.Id);
+        if (family is null) return Forbid();
+
+        var childUserIds = family.Members
+            .Where(m => m.Role == FamilyRole.Child)
+            .Select(m => m.UserId)
+            .ToList();
+
+        var children = await _db.Users
+            .Include(u => u.Tasks)
+            .Include(u => u.Shield)
+            .Where(u => childUserIds.Contains(u.Id))
+            .ToListAsync();
+
+        var result = children.Select(c => BuildChildProgress(c)).ToList();
+        return Ok(result);
+    }
+
+    // GET /family/children/{childId} — parent gets full state of one child
+    [HttpGet("children/{childId:guid}")]
+    public async Task<IActionResult> GetChild(Guid childId)
+    {
+        var user = CurrentUser;
+        if (!await IsParentOf(user.Id, childId)) return Forbid();
+
+        var child = await _db.Users
+            .Include(u => u.Tasks)
+            .Include(u => u.Shield)
+            .FirstOrDefaultAsync(u => u.Id == childId);
+
+        if (child is null) return NotFound();
+        return Ok(BuildChildProgress(child));
+    }
+
+    // POST /family/children/{childId}/tasks — parent adds task to child
+    [HttpPost("children/{childId:guid}/tasks")]
+    public async Task<IActionResult> AddTaskToChild(Guid childId, [FromBody] CreateTaskRequest req)
+    {
+        var user = CurrentUser;
+        if (!await IsParentOf(user.Id, childId)) return Forbid();
+
+        var task = new TaskItem { UserId = childId, Title = req.Title };
+        _db.Tasks.Add(task);
+        await _db.SaveChangesAsync();
+
+        return Ok(UsersController.MapTask(task));
+    }
+
+    // PATCH /family/children/{childId}/tasks/{taskId} — parent renames child's task
+    [HttpPatch("children/{childId:guid}/tasks/{taskId:guid}")]
+    public async Task<IActionResult> UpdateChildTask(Guid childId, Guid taskId, [FromBody] UpdateTaskRequest req)
+    {
+        var user = CurrentUser;
+        if (!await IsParentOf(user.Id, childId)) return Forbid();
+
+        var task = await _db.Tasks.FirstOrDefaultAsync(t => t.Id == taskId && t.UserId == childId);
+        if (task is null) return NotFound();
+
+        if (req.Title is not null) task.Title = req.Title;
+        await _db.SaveChangesAsync();
+
+        return Ok(UsersController.MapTask(task));
+    }
+
+    // DELETE /family/children/{childId}/tasks/{taskId} — parent deletes child's task
+    [HttpDelete("children/{childId:guid}/tasks/{taskId:guid}")]
+    public async Task<IActionResult> DeleteChildTask(Guid childId, Guid taskId)
+    {
+        var user = CurrentUser;
+        if (!await IsParentOf(user.Id, childId)) return Forbid();
+
+        var task = await _db.Tasks.FirstOrDefaultAsync(t => t.Id == taskId && t.UserId == childId);
+        if (task is null) return NotFound();
+
+        _db.Tasks.Remove(task);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    // MARK: - Helpers
+
+    private async Task<Family?> GetParentFamily(Guid userId)
+    {
+        var membership = await _db.FamilyMembers
+            .Include(m => m.Family).ThenInclude(f => f.Members)
+            .FirstOrDefaultAsync(m => m.UserId == userId && m.Role == FamilyRole.Parent);
+        return membership?.Family;
+    }
+
+    private async Task<bool> IsParentOf(Guid parentUserId, Guid childUserId)
+    {
+        var parentMembership = await _db.FamilyMembers
+            .FirstOrDefaultAsync(m => m.UserId == parentUserId && m.Role == FamilyRole.Parent);
+        if (parentMembership is null) return false;
+
+        return await _db.FamilyMembers.AnyAsync(m =>
+            m.UserId == childUserId &&
+            m.FamilyId == parentMembership.FamilyId &&
+            m.Role == FamilyRole.Child);
+    }
+
+    private static ChildProgressDTO BuildChildProgress(User child)
+    {
+        var activeTasks = child.Tasks.Where(t => !t.IsSnoozed && !t.IsDismissedToday && !t.IsTomorrowOnly).ToList();
+        var completedCount = activeTasks.Count(t => t.IsCompleted);
+        var completion = activeTasks.Count > 0 ? (double)completedCount / activeTasks.Count : 0;
+
+        var shield = child.Shield ?? new Shield();
+        var tasks = child.Tasks.Where(t => !t.IsTomorrowOnly).Select(UsersController.MapTask).ToList();
+
+        return new ChildProgressDTO(
+            UserId: child.Id,
+            Name: child.Name,
+            TotalStars: child.TotalStars,
+            DailyStars: child.DailyStars,
+            DailyCompletionPercentage: completion,
+            Shield: new ShieldDTO(shield.Fragments, shield.IsActive),
+            Tasks: tasks
+        );
+    }
+
+    private static string GenerateInviteCode()
+    {
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(6);
+        return new string(bytes.Select(b => chars[b % chars.Length]).ToArray());
+    }
+}
