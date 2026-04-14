@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("NimbosService")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d33407a12801aa70cb097c5ba1ca1986625088f3")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ec6e0e81278f450f7989449163b8de1e2202201c")]
 [assembly: System.Reflection.AssemblyProductAttribute("NimbosService")]
 [assembly: System.Reflection.AssemblyTitleAttribute("NimbosService")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
