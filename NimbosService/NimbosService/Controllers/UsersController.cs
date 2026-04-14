@@ -33,7 +33,10 @@ public class UsersController : ControllerBase
             ListPin = req.Pin,
             GoogleId = req.GoogleId,
             AppleId = req.AppleId,
-            Email = req.Email
+            Email = req.Email,
+            Role = Enum.TryParse<UserRole>(req.Role, ignoreCase: true, out var parsedRole)
+                ? parsedRole
+                : UserRole.Solo
         };
 
         _db.Users.Add(user);

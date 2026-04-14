@@ -8,7 +8,8 @@ public record RegisterRequest(
     List<string> Tasks,
     string? GoogleId,
     string? AppleId,
-    string? Email
+    string? Email,
+    string? Role
 );
 
 public record RegisterResponse(Guid UserId, string Token, UserDTO User);

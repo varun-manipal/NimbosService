@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using NimbosService.Data;
 using NimbosService.DTOs;
@@ -19,16 +20,40 @@ public class FamilyController : ControllerBase
 
     private User CurrentUser => (User)HttpContext.Items["CurrentUser"]!;
 
-    // POST /family — create a new family, caller becomes Parent
+    // POST /family — create a new family, caller becomes Parent.
+    // Idempotent: if the caller is already the parent of a family, returns that family.
     [HttpPost]
     public async Task<IActionResult> CreateFamily([FromBody] CreateFamilyRequest req)
     {
         var user = CurrentUser;
 
-        if (await _db.FamilyMembers.AnyAsync(m => m.UserId == user.Id))
-            return Conflict(new { error = "You are already in a family." });
+        // Check whether the user is already a family member.
+        var existingMembership = await _db.FamilyMembers
+            .Include(m => m.Family).ThenInclude(f => f.Members).ThenInclude(m => m.User)
+            .FirstOrDefaultAsync(m => m.UserId == user.Id);
 
-        var family = new Family { Name = req.FamilyName, InviteCode = string.Empty };
+        if (existingMembership is not null)
+        {
+            // A child who already joined a family via invite cannot re-register as a parent.
+            if (existingMembership.Role != FamilyRole.Parent)
+                return Conflict(new { error = "You are already a member of a family as a Child." });
+
+            // Repair case: FamilyMember row was written but User.Role was not persisted
+            // (e.g., a crash between the two writes during the original creation).
+            if (user.Role != UserRole.Parent)
+            {
+                user.Role = UserRole.Parent;
+                await _db.SaveChangesAsync();
+            }
+
+            var existingFamily = existingMembership.Family;
+            var existingMembers = existingFamily.Members.Select(m =>
+                new FamilyMemberDTO(m.UserId, m.User.Name, m.Role.ToString(), m.User.TotalStars, m.User.DailyStars)
+            ).ToList();
+            return Ok(new FamilyResponse(existingFamily.Id, existingFamily.Name, existingMembers));
+        }
+
+        var family = new Family { Name = req.FamilyName };
         _db.Families.Add(family);
 
         _db.FamilyMembers.Add(new FamilyMember
@@ -38,6 +63,8 @@ public class FamilyController : ControllerBase
             Role = FamilyRole.Parent
         });
 
+        // Always set the DB role to Parent regardless of what value was stored
+        // at registration time, so sign-in always returns "parent" for this user.
         user.Role = UserRole.Parent;
         await _db.SaveChangesAsync();
 
@@ -54,6 +81,7 @@ public class FamilyController : ControllerBase
         var user = CurrentUser;
 
         var membership = await _db.FamilyMembers
+            .AsNoTracking()
             .Include(m => m.Family).ThenInclude(f => f.Members).ThenInclude(m => m.User)
             .FirstOrDefaultAsync(m => m.UserId == user.Id);
 
@@ -113,9 +141,10 @@ public class FamilyController : ControllerBase
         var family = await GetParentFamily(user.Id);
         if (family is null) return Forbid();
 
-        var email = req.Email.Trim().ToLowerInvariant();
-        if (string.IsNullOrEmpty(email))
+        // Validate before Trim() to avoid NullReferenceException on null body field
+        if (string.IsNullOrWhiteSpace(req.Email))
             return BadRequest(new { error = "Email is required." });
+        var email = req.Email.Trim().ToLowerInvariant();
 
         // Return existing unused invite for this email if one exists
         var existing = await _db.FamilyInvites
@@ -123,16 +152,28 @@ public class FamilyController : ControllerBase
         if (existing is not null)
             return Ok(new InviteResponse(existing.InviteCode, existing.Email));
 
-        // Generate a unique invite code
-        var code = GenerateInviteCode();
-        while (await _db.FamilyInvites.AnyAsync(fi => fi.InviteCode == code))
-            code = GenerateInviteCode();
-
-        var invite = new FamilyInvite { FamilyId = family.Id, Email = email, InviteCode = code };
-        _db.FamilyInvites.Add(invite);
-        await _db.SaveChangesAsync();
-
-        return Ok(new InviteResponse(code, email));
+        // Generate a unique invite code, retrying on the rare concurrent-insert collision.
+        // We skip the AnyAsync pre-check and let the unique index be the sole guard — it is
+        // race-free and avoids an extra DB round-trip on every attempt.
+        // SQL Server error 2627 = primary key violation; 2601 = unique index violation.
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            var code = GenerateInviteCode();
+            var invite = new FamilyInvite { FamilyId = family.Id, Email = email, InviteCode = code };
+            _db.FamilyInvites.Add(invite);
+            try
+            {
+                await _db.SaveChangesAsync();
+                return Ok(new InviteResponse(code, email));
+            }
+            catch (DbUpdateException ex)
+                when (ex.InnerException is SqlException sqlEx && (sqlEx.Number == 2627 || sqlEx.Number == 2601))
+            {
+                _db.ChangeTracker.Clear();
+                // Concurrent insert collision — retry with a new code
+            }
+        }
+        return StatusCode(503, new { error = "Could not generate a unique invite code. Please try again." });
     }
 
     // POST /family/join — join a family as Child using invite code + email

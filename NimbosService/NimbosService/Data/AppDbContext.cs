@@ -57,7 +57,6 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Family>(e =>
         {
             e.HasKey(f => f.Id);
-            e.HasIndex(f => f.InviteCode).IsUnique();
         });
 
         modelBuilder.Entity<FamilyInvite>(e =>

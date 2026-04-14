@@ -59,7 +59,12 @@ public class AuthController : ControllerBase
             return Unauthorized(new { error = $"Token audience mismatch: got {aud}, expected {expectedClientId}" });
 
         // 3. Validate email is verified
-        var emailVerified = root.TryGetProperty("email_verified", out var evProp) && evProp.GetBoolean();
+        var emailVerified = root.TryGetProperty("email_verified", out var evProp) &&
+            evProp.ValueKind switch {
+                System.Text.Json.JsonValueKind.True   => true,
+                System.Text.Json.JsonValueKind.String => evProp.GetString() == "true",
+                _                                     => false
+            };
         if (!emailVerified)
             return Unauthorized(new { error = "Email not verified" });
 
@@ -103,7 +108,7 @@ public class AuthController : ControllerBase
                 IsNewUser: false,
                 User: userDto,
                 GoogleId: null,
-                Email: null
+                Email: user.Email
             ));
         }
 
@@ -158,8 +163,8 @@ public class AuthController : ControllerBase
                 IsNewUser: false,
                 User: userDto,
                 AppleId: null,
-                Email: null,
-                FullName: null
+                Email: user.Email,
+                FullName: user.Name
             ));
         }
 
