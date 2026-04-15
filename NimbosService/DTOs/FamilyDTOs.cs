@@ -29,5 +29,6 @@ public record ChildProgressDTO(
     int DailyStars,
     double DailyCompletionPercentage,
     ShieldDTO Shield,
-    List<TaskDTO> Tasks
+    List<TaskDTO> Tasks,
+    bool HasNewAwardClaim
 );

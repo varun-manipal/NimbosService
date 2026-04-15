@@ -1,10 +1,17 @@
 using Microsoft.EntityFrameworkCore;
 using NimbosService.Data;
 using NimbosService.Middleware;
+using NimbosService.Utilities;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+builder.Services.AddControllers().AddJsonOptions(opts =>
+{
+    // EF Core reads DateTime from SQL Server with DateTimeKind.Unspecified, causing System.Text.Json
+    // to omit the 'Z' timezone designator. Force all DateTimes to be treated as UTC on both
+    // read and write so clients always receive a well-formed ISO-8601 string ending in 'Z'.
+    opts.JsonSerializerOptions.Converters.Add(new UtcDateTimeConverter());
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddHttpClient();

@@ -111,7 +111,8 @@ public class UsersController : ControllerBase
         IsSnoozed: t.IsSnoozed,
         IsDismissedToday: t.IsDismissedToday,
         IsSkippedTomorrow: t.IsSkippedTomorrow,
-        IsTomorrowOnly: t.IsTomorrowOnly
+        IsTomorrowOnly: t.IsTomorrowOnly,
+        AddedByParent: t.AddedByParent
     );
 
     private static UserDTO BuildUserDTO(User user, Shield shield, List<TaskItem> allTasks) =>

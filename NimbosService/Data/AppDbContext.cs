@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<Family> Families => Set<Family>();
     public DbSet<FamilyMember> FamilyMembers => Set<FamilyMember>();
     public DbSet<FamilyInvite> FamilyInvites => Set<FamilyInvite>();
+    public DbSet<MilestoneAward> MilestoneAwards => Set<MilestoneAward>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -84,6 +85,18 @@ public class AppDbContext : DbContext
              .WithMany()
              .HasForeignKey(m => m.UserId)
              .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MilestoneAward>(e =>
+        {
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => new { a.ChildId, a.MilestoneShards }).IsUnique();
+            e.HasOne(a => a.Child)
+             .WithMany()
+             .HasForeignKey(a => a.ChildId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.ToTable(t => t.HasCheckConstraint("CK_MilestoneAward_MilestoneShards",
+                "[MilestoneShards] IN (12, 35, 50, 100)"));
         });
     }
 }

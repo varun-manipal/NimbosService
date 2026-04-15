@@ -235,7 +235,23 @@ public class FamilyController : ControllerBase
             .Where(u => childUserIds.Contains(u.Id))
             .ToListAsync();
 
-        var result = children.Select(c => BuildChildProgress(c)).ToList();
+        List<MilestoneAward> allAwards;
+        try
+        {
+            allAwards = await _db.MilestoneAwards
+                .Where(a => childUserIds.Contains(a.ChildId))
+                .ToListAsync();
+        }
+        catch
+        {
+            allAwards = new List<MilestoneAward>();
+        }
+
+        var result = children.Select(c =>
+        {
+            var awards = allAwards.Where(a => a.ChildId == c.Id).ToList();
+            return BuildChildProgress(c, awards);
+        }).ToList();
         return Ok(result);
     }
 
@@ -252,7 +268,12 @@ public class FamilyController : ControllerBase
             .FirstOrDefaultAsync(u => u.Id == childId);
 
         if (child is null) return NotFound();
-        return Ok(BuildChildProgress(child));
+
+        List<MilestoneAward> awards;
+        try { awards = await _db.MilestoneAwards.Where(a => a.ChildId == childId).ToListAsync(); }
+        catch { awards = new List<MilestoneAward>(); }
+
+        return Ok(BuildChildProgress(child, awards));
     }
 
     // POST /family/children/{childId}/tasks — parent adds task to child
@@ -262,7 +283,7 @@ public class FamilyController : ControllerBase
         var user = CurrentUser;
         if (!await IsParentOf(user.Id, childId)) return Forbid();
 
-        var task = new TaskItem { UserId = childId, Title = req.Title };
+        var task = new TaskItem { UserId = childId, Title = req.Title, AddedByParent = true };
         _db.Tasks.Add(task);
         await _db.SaveChangesAsync();
 
@@ -322,7 +343,7 @@ public class FamilyController : ControllerBase
             m.Role == FamilyRole.Child);
     }
 
-    private static ChildProgressDTO BuildChildProgress(User child)
+    private static ChildProgressDTO BuildChildProgress(User child, List<MilestoneAward> awards)
     {
         var activeTasks = child.Tasks.Where(t => !t.IsSnoozed && !t.IsDismissedToday && !t.IsTomorrowOnly).ToList();
         var completedCount = activeTasks.Count(t => t.IsCompleted);
@@ -330,6 +351,7 @@ public class FamilyController : ControllerBase
 
         var shield = child.Shield ?? new Shield();
         var tasks = child.Tasks.Where(t => !t.IsTomorrowOnly).Select(UsersController.MapTask).ToList();
+        bool hasNewAwardClaim = awards.Any(a => a.ClaimedAt != null && a.ParentViewedAt == null);
 
         return new ChildProgressDTO(
             UserId: child.Id,
@@ -338,9 +360,76 @@ public class FamilyController : ControllerBase
             DailyStars: child.DailyStars,
             DailyCompletionPercentage: completion,
             Shield: new ShieldDTO(shield.Fragments, shield.IsActive),
-            Tasks: tasks
+            Tasks: tasks,
+            HasNewAwardClaim: hasNewAwardClaim
         );
     }
+
+    // GET /family/children/{childId}/awards — parent views child's award status
+    [HttpGet("children/{childId:guid}/awards")]
+    public async Task<IActionResult> GetChildAwards(Guid childId)
+    {
+        var user = CurrentUser;
+        if (!await IsParentOf(user.Id, childId)) return Forbid();
+        return Ok(await GetOrCreateAwardDTOs(childId, markViewed: true));
+    }
+
+    // PUT /family/children/{childId}/awards/{milestoneShards} — parent sets award text
+    [HttpPut("children/{childId:guid}/awards/{milestoneShards:int}")]
+    public async Task<IActionResult> SetChildAward(Guid childId, int milestoneShards, [FromBody] SetMilestoneAwardRequest req)
+    {
+        var user = CurrentUser;
+        if (!await IsParentOf(user.Id, childId)) return Forbid();
+
+        if (!ValidMilestones.Contains(milestoneShards))
+            return BadRequest(new { error = "milestoneShards must be 12, 35, 50, or 100." });
+
+        if (string.IsNullOrWhiteSpace(req.Award1) && string.IsNullOrWhiteSpace(req.Award2) && string.IsNullOrWhiteSpace(req.Award3))
+            return BadRequest(new { error = "At least one award must be provided." });
+
+        var existing = await _db.MilestoneAwards
+            .FirstOrDefaultAsync(a => a.ChildId == childId && a.MilestoneShards == milestoneShards);
+
+        if (existing is null)
+        {
+            existing = new MilestoneAward { ChildId = childId, MilestoneShards = milestoneShards };
+            _db.MilestoneAwards.Add(existing);
+        }
+
+        existing.Award1 = string.IsNullOrWhiteSpace(req.Award1) ? null : req.Award1.Trim();
+        existing.Award2 = string.IsNullOrWhiteSpace(req.Award2) ? null : req.Award2.Trim();
+        existing.Award3 = string.IsNullOrWhiteSpace(req.Award3) ? null : req.Award3.Trim();
+        existing.UpdatedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+        return Ok(MapAward(existing));
+    }
+
+    private static readonly int[] ValidMilestones = [12, 35, 50, 100];
+
+    private async Task<List<MilestoneAwardDTO>> GetOrCreateAwardDTOs(Guid childId, bool markViewed = false)
+    {
+        var awards = await _db.MilestoneAwards
+            .Where(a => a.ChildId == childId)
+            .ToListAsync();
+
+        if (markViewed)
+        {
+            foreach (var a in awards.Where(a => a.ClaimedAt != null && a.ParentViewedAt == null))
+                a.ParentViewedAt = DateTime.UtcNow;
+            if (awards.Any(a => a.ParentViewedAt.HasValue))
+                await _db.SaveChangesAsync();
+        }
+
+        return ValidMilestones.Select(shards =>
+        {
+            var a = awards.FirstOrDefault(x => x.MilestoneShards == shards);
+            return a is not null ? MapAward(a) : new MilestoneAwardDTO(shards, null, null, null, null, null, null);
+        }).ToList();
+    }
+
+    private static MilestoneAwardDTO MapAward(MilestoneAward a) =>
+        new(a.MilestoneShards, a.Award1, a.Award2, a.Award3, a.ClaimedAwardIndex, a.ClaimedAt, a.ParentViewedAt);
 
     private static string GenerateInviteCode()
     {

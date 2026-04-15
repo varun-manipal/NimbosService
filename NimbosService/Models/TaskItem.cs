@@ -15,6 +15,7 @@ public class TaskItem
     public bool IsDismissedToday { get; set; } = false;
     public bool IsSkippedTomorrow { get; set; } = false;
     public bool IsTomorrowOnly { get; set; } = false;
+    public bool AddedByParent { get; set; } = false;
 
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

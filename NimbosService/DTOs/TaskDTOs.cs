@@ -17,7 +17,8 @@ public record TaskDTO(
     bool IsSnoozed,
     bool IsDismissedToday,
     bool IsSkippedTomorrow,
-    bool IsTomorrowOnly
+    bool IsTomorrowOnly,
+    bool AddedByParent
 );
 
 public record UpdateTaskResponse(TaskDTO Task, UserStarsDTO User);
