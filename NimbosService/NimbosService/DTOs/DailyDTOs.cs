@@ -1,6 +1,6 @@
 namespace NimbosService.DTOs;
 
-public record NewDayRequest(string LastOpenedDate);
+public record NewDayRequest(string LastOpenedDate, string? CurrentDate);
 
 public record NewDayResponse(
     bool WasNewDay,

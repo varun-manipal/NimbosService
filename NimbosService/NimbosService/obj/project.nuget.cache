@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "pWCSA8B3lww=",
+  "dgSpecHash": "S2ZFSM1TK5A=",
   "success": true,
-  "projectFilePath": "/Users/varun/Development/NimbosService/NimbosService/NimbosService.csproj",
+  "projectFilePath": "/Users/Varun/Development/NimbosService/NimbosService/NimbosService.csproj",
   "expectedPackageFiles": [
     "/Users/varun/.nuget/packages/azure.core/1.47.1/azure.core.1.47.1.nupkg.sha512",
     "/Users/varun/.nuget/packages/azure.identity/1.14.2/azure.identity.1.14.2.nupkg.sha512",
@@ -55,7 +55,10 @@
     "/Users/varun/.nuget/packages/system.identitymodel.tokens.jwt/7.7.1/system.identitymodel.tokens.jwt.7.7.1.nupkg.sha512",
     "/Users/varun/.nuget/packages/system.memory.data/8.0.1/system.memory.data.8.0.1.nupkg.sha512",
     "/Users/varun/.nuget/packages/system.security.cryptography.pkcs/9.0.4/system.security.cryptography.pkcs.9.0.4.nupkg.sha512",
-    "/Users/varun/.nuget/packages/system.security.cryptography.protecteddata/9.0.4/system.security.cryptography.protecteddata.9.0.4.nupkg.sha512"
+    "/Users/varun/.nuget/packages/system.security.cryptography.protecteddata/9.0.4/system.security.cryptography.protecteddata.9.0.4.nupkg.sha512",
+    "/Users/varun/.nuget/packages/microsoft.netcore.app.runtime.win-x64/10.0.5/microsoft.netcore.app.runtime.win-x64.10.0.5.nupkg.sha512",
+    "/Users/varun/.nuget/packages/microsoft.aspnetcore.app.runtime.win-x64/10.0.5/microsoft.aspnetcore.app.runtime.win-x64.10.0.5.nupkg.sha512",
+    "/Users/varun/.nuget/packages/microsoft.netcore.app.host.win-x64/10.0.5/microsoft.netcore.app.host.win-x64.10.0.5.nupkg.sha512"
   ],
   "logs": []
 }

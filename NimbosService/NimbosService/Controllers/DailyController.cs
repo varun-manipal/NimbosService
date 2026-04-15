@@ -26,7 +26,11 @@ public class DailyController : ControllerBase
         if (!DateOnly.TryParse(req.LastOpenedDate, out var lastOpenedDate))
             return BadRequest(new { error = "Invalid date format. Use yyyy-MM-dd" });
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        // Prefer the client's local date so users in UTC-offset timezones don't get
+        // spurious new-day resets between midnight UTC and their local midnight.
+        var today = DateOnly.TryParse(req.CurrentDate, out var clientDate)
+            ? clientDate
+            : DateOnly.FromDateTime(DateTime.UtcNow);
 
         var dbUser = await _db.Users.FindAsync(currentUser.Id);
 

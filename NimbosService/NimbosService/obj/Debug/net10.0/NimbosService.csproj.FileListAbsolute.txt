@@ -1,11 +1,5 @@
-/Users/Varun/Development/NimbosService/NimbosService/bin/Debug/net10.0/publish/web.config
 /Users/Varun/Development/NimbosService/NimbosService/bin/Debug/net10.0/appsettings.Development.json
 /Users/Varun/Development/NimbosService/NimbosService/bin/Debug/net10.0/appsettings.json
-/Users/Varun/Development/NimbosService/NimbosService/bin/Debug/net10.0/publish/appsettings.Development.json
-/Users/Varun/Development/NimbosService/NimbosService/bin/Debug/net10.0/publish/appsettings.json
-/Users/Varun/Development/NimbosService/NimbosService/bin/Debug/net10.0/publish/NimbosService.deps.json
-/Users/Varun/Development/NimbosService/NimbosService/bin/Debug/net10.0/publish/NimbosService.runtimeconfig.json
-/Users/Varun/Development/NimbosService/NimbosService/bin/Debug/net10.0/publish/NimbosService.staticwebassets.endpoints.json
 /Users/Varun/Development/NimbosService/NimbosService/bin/Debug/net10.0/NimbosService.staticwebassets.endpoints.json
 /Users/Varun/Development/NimbosService/NimbosService/bin/Debug/net10.0/NimbosService
 /Users/varun/Development/NimbosService/NimbosService/bin/Debug/net10.0/NimbosService.deps.json
