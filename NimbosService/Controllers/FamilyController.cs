@@ -107,7 +107,7 @@ public class FamilyController : ControllerBase
         var pending = await _db.FamilyInvites
             .Where(fi => fi.FamilyId == family.Id && !fi.IsUsed)
             .OrderByDescending(fi => fi.CreatedAt)
-            .Select(fi => new InviteResponse(fi.InviteCode, fi.Email))
+            .Select(fi => new InviteResponse(fi.InviteCode, fi.Email, fi.Role))
             .ToListAsync();
 
         return Ok(pending);
@@ -146,11 +146,15 @@ public class FamilyController : ControllerBase
             return BadRequest(new { error = "Email is required." });
         var email = req.Email.Trim().ToLowerInvariant();
 
+        var role = string.IsNullOrWhiteSpace(req.Role) ? "child" : req.Role.Trim().ToLowerInvariant();
+        if (role != "child" && role != "parent")
+            return BadRequest(new { error = "Role must be 'child' or 'parent'." });
+
         // Return existing unused invite for this email if one exists
         var existing = await _db.FamilyInvites
             .FirstOrDefaultAsync(fi => fi.FamilyId == family.Id && fi.Email == email && !fi.IsUsed);
         if (existing is not null)
-            return Ok(new InviteResponse(existing.InviteCode, existing.Email));
+            return Ok(new InviteResponse(existing.InviteCode, existing.Email, existing.Role));
 
         // Generate a unique invite code, retrying on the rare concurrent-insert collision.
         // We skip the AnyAsync pre-check and let the unique index be the sole guard — it is
@@ -159,12 +163,12 @@ public class FamilyController : ControllerBase
         for (int attempt = 0; attempt < 5; attempt++)
         {
             var code = GenerateInviteCode();
-            var invite = new FamilyInvite { FamilyId = family.Id, Email = email, InviteCode = code };
+            var invite = new FamilyInvite { FamilyId = family.Id, Email = email, InviteCode = code, Role = role };
             _db.FamilyInvites.Add(invite);
             try
             {
                 await _db.SaveChangesAsync();
-                return Ok(new InviteResponse(code, email));
+                return Ok(new InviteResponse(code, email, role));
             }
             catch (DbUpdateException ex)
                 when (ex.InnerException is SqlException sqlEx && (sqlEx.Number == 2627 || sqlEx.Number == 2601))
@@ -197,21 +201,24 @@ public class FamilyController : ControllerBase
 
         invite.IsUsed = true;
 
+        var memberRole = invite.Role == "parent" ? FamilyRole.Parent : FamilyRole.Child;
+        var userRole   = invite.Role == "parent" ? UserRole.Parent   : UserRole.Child;
+
         _db.FamilyMembers.Add(new FamilyMember
         {
             FamilyId = invite.FamilyId,
             UserId = user.Id,
-            Role = FamilyRole.Child
+            Role = memberRole
         });
 
-        user.Role = UserRole.Child;
+        user.Role = userRole;
         await _db.SaveChangesAsync();
 
         var family = invite.Family;
         var members = family.Members.Select(m =>
             new FamilyMemberDTO(m.UserId, m.User.Name, m.Role.ToString(), m.User.TotalStars, m.User.DailyStars)
         ).ToList();
-        members.Add(new FamilyMemberDTO(user.Id, user.Name, "Child", user.TotalStars, user.DailyStars));
+        members.Add(new FamilyMemberDTO(user.Id, user.Name, memberRole.ToString(), user.TotalStars, user.DailyStars));
 
         return Ok(new FamilyResponse(family.Id, family.Name, members));
     }

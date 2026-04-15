@@ -2,9 +2,9 @@ namespace NimbosService.DTOs;
 
 public record CreateFamilyRequest(string FamilyName);
 
-public record CreateInviteRequest(string Email);
+public record CreateInviteRequest(string Email, string? Role);
 
-public record InviteResponse(string InviteCode, string Email);
+public record InviteResponse(string InviteCode, string Email, string Role);
 
 public record JoinFamilyRequest(string InviteCode, string Email);
 
