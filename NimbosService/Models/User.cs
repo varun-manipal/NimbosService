@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace NimbosService.Models;
 
@@ -26,6 +27,12 @@ public class User
 
     [MaxLength(254)]
     public string? Email { get; set; }
+
+    // NotMapped: stored in DB but EF Core must not include in SELECT/INSERT.
+    // Accessed only via raw SQL so pre-existing deployments without these columns still work.
+    [NotMapped] public string? ApnsToken { get; set; }
+    [NotMapped] public string? Timezone { get; set; }
+    [NotMapped] public bool ApnsSandbox { get; set; } = true;
 
     public UserRole Role { get; set; } = UserRole.Solo;
 

@@ -101,6 +101,28 @@ public class UsersController : ControllerBase
         user.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
+
+        // ApnsToken/Timezone/ApnsSandbox are [NotMapped] — persist via raw SQL so this
+        // works even before the AddApnsColumns migration has run on the server.
+        if (req.ApnsToken is not null || req.Timezone is not null || req.ApnsSandbox is not null)
+        {
+            try
+            {
+                await _db.Database.ExecuteSqlRawAsync(@"
+                    IF COL_LENGTH('Users','ApnsToken') IS NOT NULL
+                        UPDATE Users SET
+                            ApnsToken   = COALESCE({0}, ApnsToken),
+                            Timezone    = COALESCE({1}, Timezone),
+                            ApnsSandbox = COALESCE({2}, ApnsSandbox)
+                        WHERE Id = {3}",
+                    req.ApnsToken ?? (object)DBNull.Value,
+                    req.Timezone  ?? (object)DBNull.Value,
+                    req.ApnsSandbox.HasValue ? (object)req.ApnsSandbox.Value : DBNull.Value,
+                    currentUser.Id);
+            }
+            catch { /* columns may not exist yet — safe to ignore */ }
+        }
+
         return Ok(new { name = user.Name, vibe = user.Vibe });
     }
 

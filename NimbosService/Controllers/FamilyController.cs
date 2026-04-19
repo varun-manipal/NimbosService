@@ -4,18 +4,26 @@ using Microsoft.EntityFrameworkCore;
 using NimbosService.Data;
 using NimbosService.DTOs;
 using NimbosService.Models;
+using NimbosService.Services;
 
 namespace NimbosService.Controllers;
+
 
 [ApiController]
 [Route("family")]
 public class FamilyController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IServiceProvider _services;
+    private readonly ILogger<FamilyController> _logger;
+    private readonly EmailService _email;
 
-    public FamilyController(AppDbContext db)
+    public FamilyController(AppDbContext db, IServiceProvider services, ILogger<FamilyController> logger, EmailService email)
     {
         _db = db;
+        _services = services;
+        _logger = logger;
+        _email = email;
     }
 
     private User CurrentUser => (User)HttpContext.Items["CurrentUser"]!;
@@ -47,9 +55,10 @@ public class FamilyController : ControllerBase
             }
 
             var existingFamily = existingMembership.Family;
-            var existingMembers = existingFamily.Members.Select(m =>
-                new FamilyMemberDTO(m.UserId, m.User.Name, m.Role.ToString(), m.User.TotalStars, m.User.DailyStars)
-            ).ToList();
+            var existingMembers = existingFamily.Members
+                .Where(m => m.User is not null)
+                .Select(m => new FamilyMemberDTO(m.UserId, m.User.Name, m.Role.ToString(), m.User.TotalStars, m.User.DailyStars))
+                .ToList();
             return Ok(new FamilyResponse(existingFamily.Id, existingFamily.Name, existingMembers));
         }
 
@@ -80,20 +89,31 @@ public class FamilyController : ControllerBase
     {
         var user = CurrentUser;
 
-        var membership = await _db.FamilyMembers
-            .AsNoTracking()
-            .Include(m => m.Family).ThenInclude(f => f.Members).ThenInclude(m => m.User)
-            .FirstOrDefaultAsync(m => m.UserId == user.Id);
+        try
+        {
+            var membership = await _db.FamilyMembers
+                .AsNoTrackingWithIdentityResolution()
+                .Include(m => m.Family).ThenInclude(f => f.Members).ThenInclude(m => m.User)
+                .FirstOrDefaultAsync(m => m.UserId == user.Id);
 
-        if (membership is null)
-            return NotFound(new { error = "You are not in a family." });
+            if (membership is null)
+                return NotFound(new { error = "You are not in a family." });
 
-        var family = membership.Family;
-        var members = family.Members.Select(m =>
-            new FamilyMemberDTO(m.UserId, m.User.Name, m.Role.ToString(), m.User.TotalStars, m.User.DailyStars)
-        ).ToList();
+            var family = membership.Family;
+            if (family is null)
+                return StatusCode(500, new { error = "family_null", userId = user.Id });
 
-        return Ok(new FamilyResponse(family.Id, family.Name, members));
+            var members = family.Members
+                .Where(m => m.User is not null)
+                .Select(m => new FamilyMemberDTO(m.UserId, m.User.Name, m.Role.ToString(), m.User.TotalStars, m.User.DailyStars))
+                .ToList();
+
+            return Ok(new FamilyResponse(family.Id, family.Name, members));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = ex.GetType().Name, message = ex.Message, inner = ex.InnerException?.Message });
+        }
     }
 
     // GET /family/invites — parent lists pending (unused) invites
@@ -150,11 +170,14 @@ public class FamilyController : ControllerBase
         if (role != "child" && role != "parent")
             return BadRequest(new { error = "Role must be 'child' or 'parent'." });
 
-        // Return existing unused invite for this email if one exists
+        // Return existing unused invite for this email if one exists (re-send the email)
         var existing = await _db.FamilyInvites
             .FirstOrDefaultAsync(fi => fi.FamilyId == family.Id && fi.Email == email && !fi.IsUsed);
         if (existing is not null)
+        {
+            FireInviteEmail(email, user.Name, existing.Role);
             return Ok(new InviteResponse(existing.InviteCode, existing.Email, existing.Role));
+        }
 
         // Generate a unique invite code, retrying on the rare concurrent-insert collision.
         // We skip the AnyAsync pre-check and let the unique index be the sole guard — it is
@@ -168,6 +191,7 @@ public class FamilyController : ControllerBase
             try
             {
                 await _db.SaveChangesAsync();
+                FireInviteEmail(email, user.Name, role);
                 return Ok(new InviteResponse(code, email, role));
             }
             catch (DbUpdateException ex)
@@ -215,9 +239,10 @@ public class FamilyController : ControllerBase
         await _db.SaveChangesAsync();
 
         var family = invite.Family;
-        var members = family.Members.Select(m =>
-            new FamilyMemberDTO(m.UserId, m.User.Name, m.Role.ToString(), m.User.TotalStars, m.User.DailyStars)
-        ).ToList();
+        var members = family.Members
+            .Where(m => m.User is not null)
+            .Select(m => new FamilyMemberDTO(m.UserId, m.User.Name, m.Role.ToString(), m.User.TotalStars, m.User.DailyStars))
+            .ToList();
         members.Add(new FamilyMemberDTO(user.Id, user.Name, memberRole.ToString(), user.TotalStars, user.DailyStars));
 
         return Ok(new FamilyResponse(family.Id, family.Name, members));
@@ -294,6 +319,59 @@ public class FamilyController : ControllerBase
         _db.Tasks.Add(task);
         await _db.SaveChangesAsync();
 
+        try
+        {
+            var push = _services.GetService<PushNotificationService>();
+            if (push is not null)
+            {
+                // ApnsToken is [NotMapped] — read via raw ADO.NET to avoid EF Core query pipeline.
+                string? apnsToken = null;
+                bool apnsSandbox = false;
+                var conn = _db.Database.GetDbConnection();
+                var shouldClose = conn.State != System.Data.ConnectionState.Open;
+                if (shouldClose) await conn.OpenAsync();
+                try
+                {
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = "SELECT ApnsToken, ApnsSandbox FROM Users WHERE Id = @id";
+                    var p = cmd.CreateParameter();
+                    p.ParameterName = "@id";
+                    p.Value = childId;
+                    cmd.Parameters.Add(p);
+                    using var reader = await cmd.ExecuteReaderAsync();
+                    if (await reader.ReadAsync())
+                    {
+                        apnsToken = reader.IsDBNull(0) ? null : reader.GetString(0);
+                        apnsSandbox = !reader.IsDBNull(1) && reader.GetBoolean(1);
+                    }
+                }
+                finally
+                {
+                    if (shouldClose) await conn.CloseAsync();
+                }
+
+                if (apnsToken is null)
+                {
+                    _logger.LogInformation("[APNs] task_added: child {ChildId} has no APNs token stored — skipping push", childId);
+                }
+                else
+                {
+                    var err = await push.SendAsync(
+                        apnsToken,
+                        $"New task from {user.Name}! ☁️",
+                        $"\u201c{req.Title}\u201d was added to your list.",
+                        "task_added",
+                        apnsSandbox);
+                    if (err is not null)
+                        _logger.LogWarning("[APNs] task_added push failed for child {ChildId} (sandbox={Sandbox}): {Error}", childId, apnsSandbox, err);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[APNs] task_added push exception for child {ChildId}", childId);
+        }
+
         return Ok(UsersController.MapTask(task));
     }
 
@@ -329,6 +407,14 @@ public class FamilyController : ControllerBase
     }
 
     // MARK: - Helpers
+
+    private void FireInviteEmail(string toEmail, string parentName, string role)
+    {
+        _ = _email.SendInviteEmailAsync(toEmail, parentName, role)
+            .ContinueWith(t => _logger.LogWarning("[Email] Invite email failed for {Email}: {Err}",
+                              toEmail, t.Exception?.GetBaseException().Message),
+                          TaskContinuationOptions.OnlyOnFaulted);
+    }
 
     private async Task<Family?> GetParentFamily(Guid userId)
     {

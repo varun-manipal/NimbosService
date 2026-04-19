@@ -1,6 +1,8 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Org.BouncyCastle.Asn1;
+using Org.BouncyCastle.Crypto.Parameters;
+using Org.BouncyCastle.Security;
 
 namespace NimbosService.Services;
 
@@ -25,10 +27,13 @@ public class PushNotificationService
         _logger = logger;
     }
 
-    public async Task SendAsync(string apnsToken, string title, string body)
+    // Returns null on success, or the APNs error detail string on failure.
+    // useSandbox param is advisory; Apns:UseSandbox config takes precedence when set.
+    public async Task<string?> SendAsync(string apnsToken, string title, string body, string type, bool useSandbox)
     {
         var bundleId = _config["Apns:BundleId"]!;
-        var useSandbox = _config["Apns:UseSandbox"] == "true";
+        var configSandbox = _config["Apns:UseSandbox"];
+        if (configSandbox is not null) useSandbox = configSandbox == "true";
         var host = useSandbox ? "api.sandbox.push.apple.com" : "api.push.apple.com";
         var jwtToken = GetOrCreateJwt();
 
@@ -36,7 +41,8 @@ public class PushNotificationService
 
         var payload = new
         {
-            aps = new { alert = new { title, body }, sound = "default" }
+            aps = new { alert = new { title, body }, sound = "default" },
+            type
         };
 
         var json = JsonSerializer.Serialize(payload);
@@ -47,7 +53,8 @@ public class PushNotificationService
             $"https://{host}/3/device/{apnsToken}")
         {
             Content = content,
-            Version = new Version(2, 0)
+            Version = new Version(2, 0),
+            VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher
         };
 
         request.Headers.Add("authorization", $"bearer {jwtToken}");
@@ -56,11 +63,16 @@ public class PushNotificationService
         request.Headers.Add("apns-priority", "10");
 
         var response = await client.SendAsync(request);
-        if (!response.IsSuccessStatusCode)
+        if (response.IsSuccessStatusCode)
         {
-            var err = await response.Content.ReadAsStringAsync();
-            _logger.LogWarning("[APNs] Push failed {Status}: {Body}", response.StatusCode, err);
+            _logger.LogInformation("[APNs] Push delivered — type={Type} sandbox={Sandbox}", type, useSandbox);
+            return null;
         }
+
+        var err = await response.Content.ReadAsStringAsync();
+        _logger.LogWarning("[APNs] Push failed {Status} — type={Type} sandbox={Sandbox}: {Body}",
+            response.StatusCode, type, useSandbox, err);
+        return $"HTTP {(int)response.StatusCode}: {err}";
     }
 
     private string GetOrCreateJwt()
@@ -81,17 +93,35 @@ public class PushNotificationService
             var payloadB64 = Base64UrlEncode(Encoding.UTF8.GetBytes(payloadJson));
             var signingInput = $"{headerB64}.{payloadB64}";
 
-            using var ecdsa = ECDsa.Create();
+            // Use BouncyCastle for signing — avoids Windows CNG key store access
+            // issues that occur under restricted IIS AppPool identities.
             var keyBytes = Convert.FromBase64String(StripPemHeaders(p8Key));
-            ecdsa.ImportPkcs8PrivateKey(keyBytes, out _);
+            var privateKey = (ECPrivateKeyParameters)PrivateKeyFactory.CreateKey(keyBytes);
+            var signer = SignerUtilities.GetSigner("SHA-256withECDSA");
+            signer.Init(true, privateKey);
+            var dataBytes = Encoding.UTF8.GetBytes(signingInput);
+            signer.BlockUpdate(dataBytes, 0, dataBytes.Length);
+            var derSignature = signer.GenerateSignature();
 
-            var dataToSign = Encoding.UTF8.GetBytes(signingInput);
-            var signature  = ecdsa.SignData(dataToSign, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+            // APNs requires IEEE P1363 format (r||s, 64 bytes), not DER.
+            var signature = DerToP1363(derSignature, 32);
 
             _cachedToken    = $"{signingInput}.{Base64UrlEncode(signature)}";
             _tokenCreatedAt = DateTime.UtcNow;
             return _cachedToken;
         }
+    }
+
+    // Converts a DER-encoded ECDSA signature to fixed-length IEEE P1363 (r||s).
+    private static byte[] DerToP1363(byte[] der, int componentLength)
+    {
+        var seq = (Asn1Sequence)Asn1Object.FromByteArray(der);
+        var r = ((DerInteger)seq[0]).PositiveValue.ToByteArrayUnsigned();
+        var s = ((DerInteger)seq[1]).PositiveValue.ToByteArrayUnsigned();
+        var result = new byte[componentLength * 2];
+        r.CopyTo(result, componentLength - r.Length);
+        s.CopyTo(result, componentLength * 2 - s.Length);
+        return result;
     }
 
     private static string StripPemHeaders(string pem) =>

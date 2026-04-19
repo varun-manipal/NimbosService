@@ -14,7 +14,7 @@ public record RegisterRequest(
 
 public record RegisterResponse(Guid UserId, string Token, UserDTO User);
 
-public record UpdateUserRequest(string? Name, string? Vibe, string? Pin);
+public record UpdateUserRequest(string? Name, string? Vibe, string? Pin, string? ApnsToken, string? Timezone, bool? ApnsSandbox);
 
 public record UserDTO(
     string Name,
