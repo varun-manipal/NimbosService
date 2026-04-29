@@ -438,12 +438,20 @@ public class FamilyController : ControllerBase
 
     private static ChildProgressDTO BuildChildProgress(User child, List<MilestoneAward> awards)
     {
+        // A completion is stale if the task was last updated before today — meaning the child
+        // completed it on a prior day and the daily reset hasn't fired yet on their device.
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        bool IsStaleCompletion(TaskItem t) =>
+            t.IsCompleted && DateOnly.FromDateTime(t.LastUpdated) < today;
+
         var activeTasks = child.Tasks.Where(t => !t.IsSnoozed && !t.IsDismissedToday && !t.IsTomorrowOnly).ToList();
-        var completedCount = activeTasks.Count(t => t.IsCompleted);
+        var completedCount = activeTasks.Count(t => t.IsCompleted && !IsStaleCompletion(t));
         var completion = activeTasks.Count > 0 ? (double)completedCount / activeTasks.Count : 0;
 
         var shield = child.Shield ?? new Shield();
-        var tasks = child.Tasks.Where(t => !t.IsTomorrowOnly).Select(UsersController.MapTask).ToList();
+        var tasks = child.Tasks.Where(t => !t.IsTomorrowOnly)
+            .Select(t => IsStaleCompletion(t) ? UsersController.MapTask(t) with { IsCompleted = false } : UsersController.MapTask(t))
+            .ToList();
         bool hasNewAwardClaim = awards.Any(a => a.ClaimedAt != null && a.ParentViewedAt == null);
 
         return new ChildProgressDTO(
